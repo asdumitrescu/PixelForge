@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -19,8 +19,6 @@ from PySide6.QtWidgets import (
 from src.constants import (
     APP_NAME,
     APP_VERSION,
-    DEFAULT_TILE_PAD,
-    DEFAULT_TILE_SIZE,
     MODELS_DIR,
     OUTPUT_FILE_FILTER,
 )
@@ -29,12 +27,15 @@ from src.engine.image_utils import load_image, save_image
 from src.engine.model_downloader import ModelDownloader
 from src.engine.model_manager import ModelManager
 from src.engine.model_registry import get_model_entry
+from src.engine.settings import AppSettings
 from src.engine.upscaler import Upscaler
+from src.gui.compare_view import CompareMode, CompareView
 from src.gui.controls_panel import ControlsPanel
 from src.gui.download_dialog import DownloadDialog
 from src.gui.drop_zone import DropZone
 from src.gui.image_viewer import ImageViewer
 from src.gui.qt_utils import format_dimensions, format_file_size, numpy_to_qpixmap
+from src.gui.settings_dialog import SettingsDialog
 from src.gui.styles import DARK_THEME
 from src.workers.model_load_worker import ModelLoadWorker
 from src.workers.upscale_worker import UpscaleWorker
@@ -50,6 +51,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._settings = AppSettings()
+
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(900, 600)
         self.setStyleSheet(DARK_THEME)
@@ -60,7 +63,7 @@ class MainWindow(QMainWindow):
         self._model_downloader = ModelDownloader(MODELS_DIR)
         self._upscaler = Upscaler(
             self._model_manager, self._device_manager,
-            DEFAULT_TILE_SIZE, DEFAULT_TILE_PAD,
+            self._settings.tile_size, self._settings.tile_pad,
         )
 
         # State
@@ -75,6 +78,8 @@ class MainWindow(QMainWindow):
         self._setup_menubar()
         self._setup_connections()
         self._update_device_info()
+        self._apply_settings()
+        self._restore_geometry()
 
     def _setup_ui(self) -> None:
         central = QWidget()
@@ -82,12 +87,14 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Left: stacked widget (drop zone / image viewer)
+        # Left: stacked widget (drop zone / image viewer / compare view)
         self._stack = QStackedWidget()
         self._drop_zone = DropZone()
         self._image_viewer = ImageViewer()
+        self._compare_view = CompareView()
         self._stack.addWidget(self._drop_zone)
         self._stack.addWidget(self._image_viewer)
+        self._stack.addWidget(self._compare_view)
         self._stack.setCurrentWidget(self._drop_zone)
 
         main_layout.addWidget(self._stack, stretch=1)
@@ -117,6 +124,13 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        settings_action = QAction("&Settings...", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self._on_settings)
+        file_menu.addAction(settings_action)
+
+        file_menu.addSeparator()
+
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
@@ -140,6 +154,47 @@ class MainWindow(QMainWindow):
         fit_action.triggered.connect(self._image_viewer.fit_to_view)
         view_menu.addAction(fit_action)
 
+        view_menu.addSeparator()
+
+        # Compare modes (only enabled after upscale)
+        self._show_original_action = QAction("Show &Original", self)
+        self._show_original_action.setShortcut(QKeySequence("O"))
+        self._show_original_action.setCheckable(True)
+        self._show_original_action.triggered.connect(self._on_show_original)
+        self._show_original_action.setEnabled(False)
+        view_menu.addAction(self._show_original_action)
+
+        compare_menu = view_menu.addMenu("&Compare Mode")
+        compare_group = QActionGroup(self)
+
+        self._compare_slider_action = QAction("&Slider", self)
+        self._compare_slider_action.setCheckable(True)
+        self._compare_slider_action.setChecked(True)
+        self._compare_slider_action.triggered.connect(
+            lambda: self._on_compare_mode(CompareMode.SLIDER)
+        )
+        compare_group.addAction(self._compare_slider_action)
+        compare_menu.addAction(self._compare_slider_action)
+
+        self._compare_sbs_action = QAction("Side &by Side", self)
+        self._compare_sbs_action.setCheckable(True)
+        self._compare_sbs_action.triggered.connect(
+            lambda: self._on_compare_mode(CompareMode.SIDE_BY_SIDE)
+        )
+        compare_group.addAction(self._compare_sbs_action)
+        compare_menu.addAction(self._compare_sbs_action)
+
+        self._compare_toggle_action = QAction("&Toggle", self)
+        self._compare_toggle_action.setCheckable(True)
+        self._compare_toggle_action.triggered.connect(
+            lambda: self._on_compare_mode(CompareMode.TOGGLE)
+        )
+        compare_group.addAction(self._compare_toggle_action)
+        compare_menu.addAction(self._compare_toggle_action)
+
+        compare_menu.setEnabled(False)
+        self._compare_menu = compare_menu
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
         about_action = QAction("&About", self)
@@ -158,10 +213,12 @@ class MainWindow(QMainWindow):
     def _on_file_open(self) -> None:
         from src.constants import INPUT_FILE_FILTER
 
+        start_dir = self._settings.last_input_dir or ""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Image", "", INPUT_FILE_FILTER
+            self, "Open Image", start_dir, INPUT_FILE_FILTER
         )
         if file_path:
+            self._settings.last_input_dir = str(Path(file_path).parent)
             self._on_file_loaded(file_path)
 
     def _on_file_loaded(self, file_path: str) -> None:
@@ -178,6 +235,12 @@ class MainWindow(QMainWindow):
             pixmap = numpy_to_qpixmap(image)
             self._image_viewer.set_image(pixmap)
             self._stack.setCurrentWidget(self._image_viewer)
+
+            # Reset compare state
+            self._compare_view.clear()
+            self._show_original_action.setChecked(False)
+            self._show_original_action.setEnabled(False)
+            self._compare_menu.setEnabled(False)
 
             # Update status
             h, w = image.shape[:2]
@@ -265,6 +328,13 @@ class MainWindow(QMainWindow):
         pixmap = numpy_to_qpixmap(result_arr)
         self._image_viewer.set_image(pixmap)
 
+        # Set up compare view with before/after
+        if self._input_image is not None:
+            before_pixmap = numpy_to_qpixmap(self._input_image)
+            self._compare_view.set_images(before_pixmap, pixmap)
+            self._show_original_action.setEnabled(True)
+            self._compare_menu.setEnabled(True)
+
         h, w = result_arr.shape[:2]
         self._controls.set_status(f"Done! Output: {format_dimensions(w, h)}")
         self.statusBar().showMessage(f"Upscaled to {format_dimensions(w, h)}")
@@ -290,9 +360,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Nothing to Save", "Upscale an image first.")
             return
 
+        # Build default save path using settings
+        out_dir = self._settings.last_output_dir or ""
+        default_ext = self._settings.output_format.lower()
+        if default_ext == "jpeg":
+            default_ext = "jpg"
         default_name = ""
         if self._input_image_path:
-            default_name = f"{self._input_image_path.stem}_upscaled.png"
+            default_name = f"{self._input_image_path.stem}_upscaled.{default_ext}"
+            if out_dir:
+                default_name = str(Path(out_dir) / default_name)
 
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self, "Save Result", default_name, OUTPUT_FILE_FILTER
@@ -306,8 +383,19 @@ class MainWindow(QMainWindow):
         fmt_map = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WebP"}
         fmt = fmt_map.get(ext, "PNG")
 
+        # Get quality from settings based on format
+        quality = 95
+        if fmt == "JPEG":
+            quality = self._settings.jpeg_quality
+        elif fmt == "WebP":
+            quality = self._settings.webp_quality
+
         try:
-            save_image(self._output_image, path, fmt=fmt, metadata=self._input_metadata)
+            save_image(
+                self._output_image, path, fmt=fmt, quality=quality,
+                metadata=self._input_metadata,
+            )
+            self._settings.last_output_dir = str(path.parent)
             size = path.stat().st_size
             self.statusBar().showMessage(
                 f"Saved: {path.name} ({format_file_size(size)})"
@@ -329,6 +417,54 @@ class MainWindow(QMainWindow):
         else:
             text = "CPU (no GPU detected)"
         self._controls.set_device_info(text)
+
+    # --- Compare ---
+
+    def _on_show_original(self, checked: bool) -> None:
+        if checked and self._compare_view.has_images():
+            self._stack.setCurrentWidget(self._compare_view)
+        else:
+            self._show_original_action.setChecked(False)
+            self._stack.setCurrentWidget(self._image_viewer)
+
+    def _on_compare_mode(self, mode: CompareMode) -> None:
+        self._compare_view.set_mode(mode)
+        if self._compare_view.has_images():
+            self._show_original_action.setChecked(True)
+            self._stack.setCurrentWidget(self._compare_view)
+
+    # --- Settings ---
+
+    def _on_settings(self) -> None:
+        dialog = SettingsDialog(self._settings, self)
+        if dialog.exec() == SettingsDialog.DialogCode.Accepted:
+            self._apply_settings()
+
+    def _apply_settings(self) -> None:
+        """Apply persisted settings to engine and controls."""
+        self._upscaler.tile_size = self._settings.tile_size
+        self._controls._tile_spin.setValue(self._settings.tile_size)
+        self._controls._half_check.setChecked(self._settings.use_half)
+
+        # Set default model in combo if it matches
+        idx = self._controls._model_combo.findData(self._settings.default_model)
+        if idx >= 0:
+            self._controls._model_combo.setCurrentIndex(idx)
+
+    def _restore_geometry(self) -> None:
+        geo = self._settings.window_geometry
+        if geo and not geo.isEmpty():
+            self.restoreGeometry(geo)
+        state = self._settings.window_state
+        if state and not state.isEmpty():
+            self.restoreState(state)
+
+    def closeEvent(self, event) -> None:
+        self._settings.window_geometry = self.saveGeometry()
+        self._settings.window_state = self.saveState()
+        super().closeEvent(event)
+
+    # --- Info ---
 
     def _on_about(self) -> None:
         QMessageBox.about(
