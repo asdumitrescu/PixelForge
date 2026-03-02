@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Model weights (downloaded at runtime)
+models/*.pth
+models/*.safetensors
+models/*.ckpt
+models/*.pt
+models/*.bin
+models/*.part
+
+# Output images
+output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Misc
+*.log
+WORK/
