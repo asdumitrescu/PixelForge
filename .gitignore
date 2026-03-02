@@ -8,12 +8,12 @@ build/
 *.egg
 
 # Virtual environments
-.venv/
+.venv
 venv/
 env/
 
 # Model weights (downloaded at runtime)
-models/*.pth
+models
 models/*.safetensors
 models/*.ckpt
 models/*.pt
