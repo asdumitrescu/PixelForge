@@ -30,13 +30,10 @@ def denoise_jpeg(image: np.ndarray, strength: int = 10) -> np.ndarray:
 
     # fastNlMeansDenoisingColored works on BGR — convert
     bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    # Positional args: src, dst, h, hColor, templateWindowSize, searchWindowSize
+    # (keyword names changed across OpenCV versions — use positional for safety)
     denoised_bgr = cv2.fastNlMeansDenoisingColored(
-        bgr,
-        None,
-        h=strength,              # luminance filter strength
-        hForColorComponents=strength,  # color filter strength
-        templateWindowSize=7,    # patch size (must be odd)
-        searchWindowSize=21,     # search area (must be odd)
+        bgr, None, strength, strength, 7, 21
     )
     result = cv2.cvtColor(denoised_bgr, cv2.COLOR_BGR2RGB)
 

@@ -35,6 +35,19 @@ class FaceEnhancer:
 
     def __init__(self, model_path: Path, device: torch.device) -> None:
         try:
+            # Patch basicsr's broken import for newer torchvision versions.
+            # basicsr imports torchvision.transforms.functional_tensor which
+            # was removed in torchvision 0.18+. The function moved to
+            # torchvision.transforms.functional.
+            import importlib
+            import sys
+
+            try:
+                importlib.import_module("torchvision.transforms.functional_tensor")
+            except ModuleNotFoundError:
+                import torchvision.transforms.functional as _F
+                sys.modules["torchvision.transforms.functional_tensor"] = _F
+
             from gfpgan import GFPGANer
         except ImportError:
             raise RuntimeError(
