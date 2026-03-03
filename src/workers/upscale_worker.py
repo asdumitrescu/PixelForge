@@ -46,12 +46,14 @@ class UpscaleWorker(QObject):
         image: np.ndarray,
         face_model_path: Path | None = None,
         device: torch.device | None = None,
+        denoise: bool = False,
     ) -> None:
         super().__init__()
         self._upscaler = upscaler
         self._image = image
         self._face_model_path = face_model_path
         self._device = device or torch.device("cpu")
+        self._denoise = denoise
         self._thread: threading.Thread | None = None
 
     # --- QThread-compatible API ---
@@ -75,9 +77,16 @@ class UpscaleWorker(QObject):
 
     def _run(self) -> None:
         try:
+            image = self._image
+
+            if self._denoise:
+                self.stage.emit("Denoising JPEG artifacts...")
+                from src.engine.preprocessor import denoise_jpeg
+                image = denoise_jpeg(image)
+
             self.stage.emit("Upscaling...")
             result = self._upscaler.upscale(
-                self._image,
+                image,
                 progress_callback=self._on_progress,
             )
 

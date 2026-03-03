@@ -73,6 +73,13 @@ class ControlsPanel(QWidget):
         self._half_check.setChecked(True)
         self._half_check.setToolTip("Reduces VRAM usage by ~50%. Recommended for 4GB GPUs.")
         settings_layout.addWidget(self._half_check)
+        self._denoise_check = QCheckBox("Denoise (JPEG cleanup)")
+        self._denoise_check.setChecked(False)
+        self._denoise_check.setToolTip(
+            "Remove JPEG compression artifacts before upscaling. "
+            "Recommended for compressed JPEG sources."
+        )
+        settings_layout.addWidget(self._denoise_check)
         self._face_enhance_check = QCheckBox("Enhance faces (GFPGAN)")
         self._face_enhance_check.setChecked(False)
         self._face_enhance_check.setToolTip(
@@ -130,6 +137,9 @@ class ControlsPanel(QWidget):
     def get_use_half(self) -> bool:
         return self._half_check.isChecked()
 
+    def get_denoise(self) -> bool:
+        return self._denoise_check.isChecked()
+
     def get_enhance_faces(self) -> bool:
         return self._face_enhance_check.isChecked()
 
@@ -149,6 +159,7 @@ class ControlsPanel(QWidget):
         self._model_combo.setEnabled(not active)
         self._tile_spin.setEnabled(not active)
         self._half_check.setEnabled(not active)
+        self._denoise_check.setEnabled(not active)
         self._face_enhance_check.setEnabled(not active)
         if active:
             self._progress_bar.setValue(0)

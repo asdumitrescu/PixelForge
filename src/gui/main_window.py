@@ -334,6 +334,7 @@ class MainWindow(QMainWindow):
             self._input_image,
             face_model_path=face_model_path,
             device=self._device_manager.device,
+            denoise=self._controls.get_denoise(),
         )
         self._upscale_worker.progress.connect(self._on_upscale_progress)
         self._upscale_worker.finished.connect(self._on_upscale_finished)
