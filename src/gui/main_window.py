@@ -294,16 +294,23 @@ class MainWindow(QMainWindow):
         self._start_upscaling()
 
     def _on_model_loaded(self) -> None:
+        self._release_worker("_model_load_worker")
         self._controls.set_status("Model loaded")
         self._start_upscaling()
 
     def _on_model_load_error(self, msg: str) -> None:
+        self._release_worker("_model_load_worker")
         self._controls.set_processing(False)
         QMessageBox.critical(self, "Model Error", f"Failed to load model:\n{msg}")
 
     def _start_upscaling(self) -> None:
         if self._input_image is None:
             return
+
+        # Cancel any existing worker before starting a new one
+        if self._upscale_worker and self._upscale_worker.isRunning():
+            self._upscale_worker.cancel()
+            self._upscale_worker.wait(3000)
 
         self._upscaler.tile_size = self._controls.get_tile_size()
         self._controls.set_processing(True)
@@ -319,6 +326,7 @@ class MainWindow(QMainWindow):
         self._controls.set_progress(current, total, eta)
 
     def _on_upscale_finished(self, result: object) -> None:
+        self._release_worker("_upscale_worker")
         result_arr = result  # It's actually np.ndarray, passed as object via Signal
         self._output_image = result_arr
         self._controls.set_processing(False)
@@ -340,12 +348,23 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Upscaled to {format_dimensions(w, h)}")
 
     def _on_upscale_error(self, msg: str) -> None:
+        self._release_worker("_upscale_worker")
         self._controls.set_processing(False)
         if msg != "Cancelled":
             QMessageBox.critical(self, "Upscale Error", f"Upscaling failed:\n{msg}")
         else:
             self._controls.set_status("Cancelled")
             self.statusBar().showMessage("Upscaling cancelled")
+
+    def _release_worker(self, attr: str) -> None:
+        """Null out a worker reference so Python GC can collect it when ready.
+
+        Do NOT call deleteLater() here — UpscaleWorker is a QObject whose
+        Python thread may still hold `self` and emit signals after finished()
+        fires. Nulling the MainWindow reference is enough; GC will collect
+        once the thread also exits and drops its reference.
+        """
+        setattr(self, attr, None)
 
     # --- Cancel ---
 
@@ -460,6 +479,12 @@ class MainWindow(QMainWindow):
             self.restoreState(state)
 
     def closeEvent(self, event) -> None:
+        # Stop any running workers before closing to prevent QThread destruction crash
+        for worker in (self._upscale_worker, self._model_load_worker):
+            if worker is not None and worker.isRunning():
+                if hasattr(worker, "cancel"):
+                    worker.cancel()
+                worker.wait(5000)
         self._settings.window_geometry = self.saveGeometry()
         self._settings.window_state = self.saveState()
         super().closeEvent(event)

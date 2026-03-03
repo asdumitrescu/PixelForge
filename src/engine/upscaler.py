@@ -83,6 +83,14 @@ class Upscaler:
         """
         self._cancelled = False
 
+        # Cap CUDA memory to 75% of total VRAM — leaves ~1 GB for the display
+        # compositor on single-GPU systems (e.g. GTX 1050 4 GB driving the screen).
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.set_per_process_memory_fraction(0.75)
+            except Exception:
+                pass  # Non-fatal — best effort
+
         if not self._model_manager.is_loaded():
             raise RuntimeError("No model loaded. Load a model before upscaling.")
 
