@@ -201,6 +201,39 @@ Key parameters:
 
 ---
 
+## 6. Face Restoration | GFPGAN
+
+### GFPGAN v1.4 | Post-Processing Face Enhancement
+
+- Source: https://github.com/TencentARC/GFPGAN
+- PyPI: `pip install gfpgan` (depends on basicsr, facexlib, opencv-python)
+- Architecture: GAN Prior Embedded Network (StyleGAN2 prior + U-Net degradation removal)
+- Paper: CVPR 2021 (GFPGAN: Towards Real-World Blind Face Restoration with Generative Facial Prior)
+
+**Model weights:**
+- GFPGANv1.4.pth — 349 MB
+- URL: https://github.com/TencentARC/GFPGAN/releases/download/v1.3.4/GFPGANv1.4.pth
+- VRAM: ~700 MB (fp16) | ~1.4 GB (fp32)
+
+**How it works in PixelForge:**
+1. Super-resolution runs first (Real-ESRGAN / HAT / SwinIR — tiled)
+2. GFPGAN detects faces in the upscaled image via RetinaFace (facexlib)
+3. Each detected face is cropped, enhanced through the GFPGAN model, and composited back
+4. `upscale=1` — no additional upscaling, just face restoration
+5. `weight=0.5` — blends 50% original + 50% restored for natural look
+
+**GTX 1050 4GB notes:**
+- GFPGAN runs sequentially AFTER upscaling (not simultaneously) — avoids VRAM conflict
+- Face patches are 512x512 — well within 4GB VRAM budget
+- Model load/unload per session (~2-5 seconds overhead)
+
+**Known compatibility issue:**
+- `basicsr/data/degradations.py` has a broken import (`torchvision.transforms.functional_tensor`) on PyTorch 2.x + modern torchvision
+- This affects training/data-augmentation code only — inference path is unaffected
+- If import fails at runtime: update basicsr to latest version or patch the import
+
+---
+
 ## 5. Sources
 
 ### Super-Resolution Models
@@ -209,6 +242,10 @@ Key parameters:
 - https://github.com/JingyunLiang/SwinIR
 - https://arxiv.org/abs/2309.05239 (HAT TPAMI 2025)
 - https://arxiv.org/abs/2308.03364 (DAT ICCV 2023)
+
+### Face Restoration
+- https://github.com/TencentARC/GFPGAN
+- https://pypi.org/project/gfpgan/
 
 ### Libraries
 - https://github.com/chaiNNer-org/spandrel

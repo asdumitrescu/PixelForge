@@ -23,6 +23,7 @@ from src.constants import (
     OUTPUT_FILE_FILTER,
 )
 from src.engine.device import DeviceManager
+from src.engine.face_enhancer import GFPGAN_MODEL
 from src.engine.image_utils import load_image, save_image
 from src.engine.model_downloader import ModelDownloader
 from src.engine.model_manager import ModelManager
@@ -267,11 +268,18 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Unknown model: {model_id}")
             return
 
-        # Check if model is downloaded
+        # Check if SR model is downloaded
         if not self._model_downloader.is_downloaded(entry):
             dialog = DownloadDialog(self._model_downloader, entry, self)
             if dialog.exec() != DownloadDialog.DialogCode.Accepted:
                 return  # User cancelled download
+
+        # Check if GFPGAN model is downloaded (when face enhance is enabled)
+        if self._controls.get_enhance_faces():
+            if not self._model_downloader.is_downloaded(GFPGAN_MODEL):
+                dialog = DownloadDialog(self._model_downloader, GFPGAN_MODEL, self)
+                if dialog.exec() != DownloadDialog.DialogCode.Accepted:
+                    return
 
         # Load model if not already loaded (or different model selected)
         model_path = self._model_downloader.get_model_path(entry)
@@ -316,10 +324,21 @@ class MainWindow(QMainWindow):
         self._controls.set_processing(True)
         self._controls.set_status("Upscaling...")
 
-        self._upscale_worker = UpscaleWorker(self._upscaler, self._input_image)
+        # Resolve face model path if face enhancement is enabled
+        face_model_path = None
+        if self._controls.get_enhance_faces():
+            face_model_path = self._model_downloader.get_model_path(GFPGAN_MODEL)
+
+        self._upscale_worker = UpscaleWorker(
+            self._upscaler,
+            self._input_image,
+            face_model_path=face_model_path,
+            device=self._device_manager.device,
+        )
         self._upscale_worker.progress.connect(self._on_upscale_progress)
         self._upscale_worker.finished.connect(self._on_upscale_finished)
         self._upscale_worker.error.connect(self._on_upscale_error)
+        self._upscale_worker.stage.connect(self._controls.set_status)
         self._upscale_worker.start()
 
     def _on_upscale_progress(self, current: int, total: int, eta: float) -> None:

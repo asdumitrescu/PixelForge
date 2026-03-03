@@ -73,6 +73,12 @@ class ControlsPanel(QWidget):
         self._half_check.setChecked(True)
         self._half_check.setToolTip("Reduces VRAM usage by ~50%. Recommended for 4GB GPUs.")
         settings_layout.addWidget(self._half_check)
+        self._face_enhance_check = QCheckBox("Enhance faces (GFPGAN)")
+        self._face_enhance_check.setChecked(False)
+        self._face_enhance_check.setToolTip(
+            "Detect and restore faces after upscaling. Requires GFPGAN model (~349 MB)."
+        )
+        settings_layout.addWidget(self._face_enhance_check)
         layout.addWidget(settings_group)
 
         # Actions
@@ -124,6 +130,9 @@ class ControlsPanel(QWidget):
     def get_use_half(self) -> bool:
         return self._half_check.isChecked()
 
+    def get_enhance_faces(self) -> bool:
+        return self._face_enhance_check.isChecked()
+
     def set_progress(self, current: int, total: int, eta: float) -> None:
         self._progress_bar.setMaximum(total)
         self._progress_bar.setValue(current)
@@ -140,6 +149,7 @@ class ControlsPanel(QWidget):
         self._model_combo.setEnabled(not active)
         self._tile_spin.setEnabled(not active)
         self._half_check.setEnabled(not active)
+        self._face_enhance_check.setEnabled(not active)
         if active:
             self._progress_bar.setValue(0)
             self._eta_label.setText("ETA: calculating...")
