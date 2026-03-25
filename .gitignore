@@ -43,3 +43,4 @@ htmlcov/
 # Misc
 *.log
 WORK/
+gfpgan/weights/
